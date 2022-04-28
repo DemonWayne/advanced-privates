@@ -4,9 +4,9 @@
 const { MessageEmbed, MessageActionRow, MessageButton, Permissions } = require('discord.js');
 const { settings: guilds } = require('../data/config');
 
-const guildCooldown = new Set();
-const memberCooldown = new Set();
-const interactionCooldown = new Set();
+const guildCooldown = new Map();
+const memberCooldown = new Map();
+const interactionCooldown = new Map();
 
 const BUTTONS = {
   '✏': 'change_name',
@@ -94,21 +94,15 @@ exports.handleVoiceState = async (client, oldState, newState) => {
         return console.error('У бота нет прав для перемещения участника!');
       }
       if (guildCooldown.has(guild.id)) {
-        sendError(newState.member);
-        newState.disconnect();
+        sendError(newState.member, guildCooldown.get(guild.id));
+        return newState.disconnect();
       } else if (memberCooldown.has(newState.member.id)) {
-        sendError(newState.member);
-        newState.disconnect();
+        sendError(newState.member, memberCooldown.get(newState.member.id));
+        return newState.disconnect();
       }
 
-      if (category.children.some(ch => ch.permissionOverwrites.cache.some(p => p.id === newState.member.id))) {
-        newState.setChannel(
-          category.children.find(ch => ch.permissionOverwrites.cache.some(p => p.id === newState.member.id)),
-        );
-      }
-
-      guildCooldown.add(guild.id);
-      memberCooldown.add(newState.member.id);
+      guildCooldown.set(guild.id, Math.round(+new Date() / 1000 + cooldown.guild / 1000));
+      memberCooldown.set(newState.member.id, Math.round(+new Date() / 1000 + cooldown.member / 1000));
 
       setTimeout(() => {
         guildCooldown.delete(guild.id);
@@ -146,13 +140,17 @@ exports.handleInteraction = (client, interaction) => {
   }
 
   const voiceOwner = memberVoice.permissionOverwrites.cache.find(p => p.allow.has('MANAGE_CHANNELS', false));
+  if (!voiceOwner) return;
   if (voiceOwner.id !== interaction.user.id) {
     interaction.reply({ content: 'Вы не влделец комнаты!', ephemeral: true });
     return;
   }
 
   if (interactionCooldown.has(interaction.user.id)) {
-    interaction.reply({ content: 'Сейчас вы не можете использовать данную кнопку!', ephemeral: true });
+    interaction.reply({
+      content: `Вы можете использовать данную кнопку <t:${interactionCooldown.get(interaction.user.id)}:R>`,
+      ephemeral: true,
+    });
     return;
   }
 
@@ -162,9 +160,11 @@ exports.handleInteraction = (client, interaction) => {
     return;
   }
 
-  const { cooldown } = settings;
+  const { cooldown, category, voice_channel } = settings;
 
-  interactionCooldown.add(interaction.user.id);
+  if (memberVoice.parent.id !== category || memberVoice.id === voice_channel) return;
+
+  interactionCooldown.set(interaction.user.id, Math.round(+new Date() / 1000 + cooldown.interaction / 1000));
 
   setTimeout(() => {
     interactionCooldown.delete(interaction.user.id);
@@ -190,9 +190,9 @@ exports.handleInteraction = (client, interaction) => {
       CONNECT: bool,
     });
 
-    log('edit', interaction.member, interaction.channel, {
-      change: 'доступ',
-      newvalue: `${bool ? 'Открыт' : 'Закрыт'} всем`,
+    log('edit', interaction.member, interaction.member.voice.channel, {
+      type: 'permissions_all',
+      newvalue: `${bool ? 'Открыт' : 'Закрыт'}`,
     });
   } else if (interaction.customId === 'transfer_ownership') {
     actions(interaction, 'В следующем сообщении упомяните нового владельца комнаты!', interaction.customId, true);
@@ -300,14 +300,14 @@ function translateButtons() {
   return translated.join('\n');
 }
 
-function sendError(member) {
+function sendError(member, unix) {
   try {
     member.send({
       embeds: [
         new MessageEmbed()
           .setColor(0xed3434)
           .setTitle('⛔ | Произошла ошибка')
-          .setDescription('В данный момент вы не можете создать/изменить комнату!'),
+          .setDescription(`В данный момент вы не можете создать комнату! Попробуйте <t:${unix}:R>`),
       ],
     });
   } catch (err) {
@@ -336,24 +336,26 @@ function actions(interaction, text, action, member = false) {
       if (action === 'setname') {
         interaction.member.voice.channel.setName(value);
 
-        interaction.editReply({
+        interaction.followUp({
           embeds: [new MessageEmbed().setColor('GREEN').setDescription('Название успешно изменено!')],
+          ephemeral: true,
         });
 
         log('edit', interaction.member, interaction.member.voice.channel, {
-          change: 'название',
+          type: 'name',
           oldvalue: interaction.member.voice.channel.name,
           newvalue: value,
         });
       } else if (action === 'setlimit') {
         interaction.member.voice.channel.setUserLimit(+value);
 
-        interaction.editReply({
+        interaction.followUp({
           embeds: [new MessageEmbed().setColor('GREEN').setDescription('Лимит успешно изменено!')],
+          ephemeral: true,
         });
 
         log('edit', interaction.member, interaction.member.voice.channel, {
-          change: 'лимит',
+          type: 'limit',
           oldvalue: interaction.member.voice.channel.userLimit,
           newvalue: value,
         });
@@ -376,12 +378,13 @@ function actions(interaction, text, action, member = false) {
           STREAM: true,
         });
 
-        interaction.editReply({
+        interaction.followUp({
           embeds: [new MessageEmbed().setColor('GREEN').setDescription('Права владения комнатой успешно переданы!')],
+          ephemeral: true,
         });
 
         log('edit', interaction.member, interaction.member.voice.channel, {
-          change: 'владелец',
+          type: 'transfer',
           oldvalue: `<@${voiceOwner.id}> \`[${voiceOwner.id}]\``,
           newvalue: `${value} \`[${value.id}]\``,
         });
@@ -390,16 +393,17 @@ function actions(interaction, text, action, member = false) {
           CONNECT: action === 'add_member',
         });
 
-        interaction.editReply({
+        interaction.followUp({
           embeds: [
             new MessageEmbed()
               .setColor('GREEN')
               .setDescription(`Участник ${value} успешно изменено ${action === 'add_member' ? 'добавлен' : 'убран'}!`),
           ],
+          ephemeral: true,
         });
 
         log('edit', interaction.member, interaction.member.voice.channel, {
-          change: 'право для',
+          type: action === 'add_member' ? 'permission_add' : 'permissions_remove',
           oldvalue: action === 'add_member' ? undefined : value,
           newvalue: action === 'add_member' ? value : undefined,
         });
@@ -409,14 +413,26 @@ function actions(interaction, text, action, member = false) {
         );
 
         if (voiceOwner.id === value.id) return;
+
+        if (!value?.voice?.channel) {
+          interaction.followUp({
+            embeds: [
+              new MessageEmbed().setColor('RED').setDescription(`Участник ${value} не находится в вашей комнате!`),
+            ],
+            ephemeral: true,
+          });
+          return;
+        }
+
         value.voice.disconnect();
 
-        interaction.editReply({
+        interaction.followUp({
           embeds: [new MessageEmbed().setColor('RED').setDescription(`Участник ${value} выгнан из вашей комнаты!`)],
+          ephemeral: true,
         });
 
         log('edit', interaction.member, interaction.member.voice.channel, {
-          change: 'участник',
+          type: 'kick',
           oldvalue: `${value} \`[${value.id}]\``,
         });
       } else if (action === 'mute_member' || action === 'unmute_member') {
@@ -429,16 +445,17 @@ function actions(interaction, text, action, member = false) {
           SPEAK: interaction.customId === 'unmute_member',
         });
 
-        interaction.editReply({
+        interaction.followUp({
           embeds: [
             new MessageEmbed()
               .setColor('RED')
               .setDescription(`Участник ${value} ${action === 'mute_member' ? 'замучен' : 'размучен'}!`),
           ],
+          ephemeral: true,
         });
 
         log('edit', interaction.member, interaction.member.voice.channel, {
-          change: 'мут',
+          type: action === 'mute_member' ? 'mute' : 'unmute',
           oldvalue: action === 'mute_member' ? undefined : `${value} \`[${value.id}]\``,
           newvalue: action === 'mute_member' ? `${value} \`[${value.id}]\`` : undefined,
         });
@@ -463,11 +480,11 @@ function log(type, member, channel, details) {
   ];
 
   if (details?.oldvalue) {
-    fields.push({ name: `Старое(-ый) ${details.change}`, value: `${details.oldvalue}`, inline: true });
+    fields.push({ name: `${fieldName(details.type).old}`, value: `${details.oldvalue}`, inline: true });
   }
 
   if (details?.newvalue) {
-    fields.push({ name: `Новое(-ый) ${details.change}`, value: `${details.newvalue}`, inline: true });
+    fields.push({ name: `${fieldName(details.type).new}`, value: `${details.newvalue}`, inline: true });
   }
 
   embed.setFields(fields);
@@ -481,4 +498,26 @@ function log(type, member, channel, details) {
   } catch (err) {
     console.error(err);
   }
+}
+
+function fieldName(type) {
+  return type === 'name'
+    ? { old: 'Старое название', new: 'Новое название' }
+    : type === 'limit'
+    ? { old: 'Старый лимит', new: 'Новый лимит' }
+    : type === 'transfer'
+    ? { old: 'Старый владелец', new: 'Новый владелец' }
+    : type === 'permission_add'
+    ? { new: 'Добавлен участник' }
+    : type === 'permissions_remove'
+    ? { old: 'Убран участник' }
+    : type === 'kick'
+    ? { old: 'Кикнут участник' }
+    : type === 'mute'
+    ? { new: 'Замучен участник' }
+    : type === 'unmute'
+    ? { old: 'Размучен участник' }
+    : type === 'permissions_all'
+    ? { new: 'Общий доступ' }
+    : { old: 'Старое значение', new: 'Новое значение' };
 }
