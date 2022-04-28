@@ -162,10 +162,6 @@ exports.handleInteraction = (client, interaction) => {
     return;
   }
 
-  if (guildCooldown.has(interaction.user.id)) {
-    sendError(interaction.member);
-  }
-
   const { cooldown } = settings;
 
   interactionCooldown.add(interaction.user.id);
