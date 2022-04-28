@@ -1,0 +1,31 @@
+{
+  "name": "advanced-privates",
+  "version": "1.0.0",
+  "description": "advanced privates",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DemonWayne/advanced-privates.git"
+  },
+  "author": "Dave_Shelby",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/DemonWayne/advanced-privates/issues"
+  },
+  "homepage": "https://github.com/DemonWayne/advanced-privates#readme",
+  "dependencies": {
+    "@sapphire/framework": "^2.4.1",
+    "@sapphire/plugin-logger": "^2.2.1",
+    "discord.js": "^13.6.0",
+    "dotenv": "^16.0.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.14.0",
+    "eslint-config-prettier": "^8.5.0",
+    "eslint-plugin-prettier": "^4.0.0",
+    "prettier": "^2.6.2"
+  }
+}
