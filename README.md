@@ -1,4 +1,4 @@
-<h1 align="center">advanced-privates <code>1.0.0</code></h1>
+<h1 align="center">advanced-privates <code>1.1.0</code></h1>
 
 ### Инструкция по использованию
 
